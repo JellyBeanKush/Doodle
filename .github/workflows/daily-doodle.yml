@@ -2,7 +2,7 @@ name: Daily Doodle Bot
 
 on:
   push:
-    branches: [main] # Change this to [master] if your default branch is master
+    branches: [main]
   schedule:
     - cron: '0 16 * * *'
   workflow_dispatch:
@@ -19,5 +19,5 @@ jobs:
       - name: Execute Script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_HOLIDAY_WEBHOOK }} 
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: node daily-doodle.mjs
