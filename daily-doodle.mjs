@@ -5,7 +5,7 @@ import { FormData, Blob } from 'formdata-node';
 const CONFIG = {
     GEMINI_KEY: process.env.GEMINI_API_KEY,
     DISCORD_URL: process.env.DISCORD_WEBHOOK, 
-    IMAGE_MODEL: "gemini-3-flash-image", 
+    IMAGE_MODEL: "gemini-3-flash-image", // Nano Banana 2
     TEXT_MODEL: "gemini-2.5-flash",
     TIMEOUT_MS: 50000 
 };
@@ -71,6 +71,7 @@ async function main() {
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const textModel = genAI.getGenerativeModel({ model: CONFIG.TEXT_MODEL });
     
+    // Style rotation logic (repeats every 15 days)
     const dayCount = Math.floor(today.getTime() / (1000 * 60 * 60 * 24));
     const baseStyle = BASE_VIBES[dayCount % BASE_VIBES.length];
 
@@ -80,26 +81,34 @@ async function main() {
     const factResult = await textModel.generateContent(`One short fact about ${safeTheme} under 20 words.`);
     const fact = (await factResult.response).text().trim();
 
-    const characterContext = `A small, round, yellow bear with a cream belly and purple eyes, standing next to a pink pill-shaped jellybean wearing a backwards teal baseball cap.`;
-    const artPrompt = `${baseStyle}, ${artTwist}. Feature ${characterContext} celebrating ${safeTheme}. STRICT: Render the text '${safeGreeting.toUpperCase()}' EXACTLY ONCE. No streamer rooms.`;
+    // Characters: description-based only as requested.
+    const characterContext = `A small, round, yellow bear with a cream belly and purple eyes, standing next to a pink oblong jellybean character wearing a backwards teal baseball cap.`;
+    const artPrompt = `${baseStyle}, ${artTwist}. Feature ${characterContext} celebrating ${safeTheme}. STRICT: Render the text '${safeGreeting.toUpperCase()}' EXACTLY ONCE.`;
 
     console.log(`🎨 Style: ${baseStyle}\n✨ Twist: ${artTwist}`);
 
     let imageBuffer;
     try {
+        console.log("🎨 Attempting generation with Nano Banana 2...");
         const imageModel = genAI.getGenerativeModel({ model: CONFIG.IMAGE_MODEL });
         const result = await imageModel.generateContent(artPrompt);
         const response = await result.response;
-        const base64Data = response.candidates[0].content.parts[0].inlineData.data;
-        imageBuffer = Buffer.from(base64Data, 'base64');
+        
+        if (response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
+            const base64Data = response.candidates[0].content.parts[0].inlineData.data;
+            imageBuffer = Buffer.from(base64Data, 'base64');
+            console.log("✅ Nano Banana 2 Success!");
+        } else {
+            throw new Error("No image data in Nano Banana 2 response.");
+        }
     } catch (err) {
-        console.log("⚠️ Gemini Image failed. Falling back to Pollinations...");
+        console.log(`⚠️ Nano Banana 2 failed: ${err.message}. Falling back to Pollinations...`);
         const pollRes = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(artPrompt)}?width=1024&height=1024&nologo=true`);
         const arrayBuffer = await pollRes.arrayBuffer();
-        imageBuffer = Buffer.from(arrayBuffer); // This converts the stream into a real file
+        imageBuffer = Buffer.from(arrayBuffer); // Fixed conversion
     }
 
-    if (!imageBuffer || imageBuffer.length < 100) {
+    if (!imageBuffer || imageBuffer.length < 500) {
         throw new Error("Failed to generate a valid image buffer.");
     }
 
@@ -107,14 +116,10 @@ async function main() {
     const payload = { content: `**${dateHeader}**\n# ${safeTheme.toUpperCase()}\n${fact}` };
     formData.set('payload_json', JSON.stringify(payload));
     
-    // Key fix: Using the Buffer specifically in the Blob constructor
     const fileBlob = new Blob([imageBuffer], { type: 'image/png' });
     formData.set('files[0]', fileBlob, 'daily_doodle.png');
 
-    const res = await fetch(CONFIG.DISCORD_URL, { 
-        method: 'POST', 
-        body: formData 
-    });
+    const res = await fetch(CONFIG.DISCORD_URL, { method: 'POST', body: formData });
 
     if (res.ok) {
         console.log(`🎉 Success! Posted to Discord.`);
