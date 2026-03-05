@@ -1,4 +1,4 @@
-name: Daily Doodle Bot
+name: Daily Doodle RUNNER
 
 on:
   push:
