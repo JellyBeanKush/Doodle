@@ -74,15 +74,12 @@ async function main() {
     const dayCount = Math.floor(today.getTime() / (1000 * 60 * 60 * 24));
     const baseStyle = BASE_VIBES[dayCount % BASE_VIBES.length];
 
-    // Get the unique AI twist
     const twistResult = await textModel.generateContent(`Base style: '${baseStyle}'. Holiday: '${safeTheme}'. Write a 10-word artistic twist. No code, just prose.`);
-    const artTwist = twistResult.response.text().trim();
+    const artTwist = (await twistResult.response).text().trim();
 
-    // Get the fun fact
     const factResult = await textModel.generateContent(`One short fact about ${safeTheme} under 20 words.`);
-    const fact = factResult.response.text().trim();
+    const fact = (await factResult.response).text().trim();
 
-    // Image Prompt
     const characterContext = `A small, round, yellow bear with a cream belly and purple eyes, standing next to a pink pill-shaped jellybean wearing a backwards teal baseball cap.`;
     const artPrompt = `${baseStyle}, ${artTwist}. Feature ${characterContext} celebrating ${safeTheme}. STRICT: Render the text '${safeGreeting.toUpperCase()}' EXACTLY ONCE. No streamer rooms.`;
 
@@ -98,15 +95,27 @@ async function main() {
     } catch (err) {
         console.log("⚠️ Gemini Image failed. Falling back to Pollinations...");
         const pollRes = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(artPrompt)}?width=1024&height=1024&nologo=true`);
-        imageBuffer = await pollRes.arrayBuffer();
+        const arrayBuffer = await pollRes.arrayBuffer();
+        imageBuffer = Buffer.from(arrayBuffer); // This converts the stream into a real file
+    }
+
+    if (!imageBuffer || imageBuffer.length < 100) {
+        throw new Error("Failed to generate a valid image buffer.");
     }
 
     const formData = new FormData();
     const payload = { content: `**${dateHeader}**\n# ${safeTheme.toUpperCase()}\n${fact}` };
     formData.set('payload_json', JSON.stringify(payload));
-    formData.set('files[0]', new Blob([imageBuffer], { type: 'image/png' }), 'daily_doodle.png');
+    
+    // Key fix: Using the Buffer specifically in the Blob constructor
+    const fileBlob = new Blob([imageBuffer], { type: 'image/png' });
+    formData.set('files[0]', fileBlob, 'daily_doodle.png');
 
-    const res = await fetch(CONFIG.DISCORD_URL, { method: 'POST', body: formData });
+    const res = await fetch(CONFIG.DISCORD_URL, { 
+        method: 'POST', 
+        body: formData 
+    });
+
     if (res.ok) {
         console.log(`🎉 Success! Posted to Discord.`);
     } else {
