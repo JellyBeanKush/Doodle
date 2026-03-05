@@ -4,14 +4,12 @@ import { FormData, Blob } from 'formdata-node';
 
 const CONFIG = {
     GEMINI_KEY: process.env.GEMINI_API_KEY,
-    // Using your full secret which includes the thread_id
     DISCORD_URL: process.env.DISCORD_WEBHOOK, 
     IMAGE_MODEL: "gemini-3-flash-image", 
     TEXT_MODEL: "gemini-2.5-flash",
     TIMEOUT_MS: 50000 
 };
 
-// 15 distinct styles to ensure > 2 weeks of variety
 const BASE_VIBES = [
     "Vibrant 2D Vector Illustration, flat colors, clean bold lines", 
     "Detailed 3D Claymation digital model, soft lighting", 
@@ -38,23 +36,20 @@ const dateHeader = today.toLocaleDateString('en-US', {
 
 async function getHolidayContext() {
     const monthDay = `${today.getMonth() + 1}-${today.getDate()}`;
-    
-    // Curated Priority Calendar
     const HOLIDAY_CALENDAR = {
-        "1-1": { theme: "New Year's Day", greet: "Happy New Year!" },
-        "2-14": { theme: "Valentine's Day", greet: "Be My Valentine" },
-        "2-27": { theme: "Pokémon Day", greet: "Happy Pokémon Day!" }, 
-        "3-5": { theme: "National Cheese Doodle Day", greet: "Happy Cheese Doodle Day!" },
-        "3-10": { theme: "Mario Day (Mar10)", greet: "It's-a Mario Day!" },
-        "4-20": { theme: "4/20 Celebration", greet: "Blaze It" },
-        "4-22": { theme: "Jelly Bean Day", greet: "Happy Jelly Bean Day!" },
-        "10-31": { theme: "Halloween", greet: "Happy Halloween!" },
-        "12-25": { theme: "Christmas Day", greet: "Merry Christmas" }
+        "1-1": { theme: "New Year's Day", greeting: "Happy New Year!" },
+        "2-14": { theme: "Valentine's Day", greeting: "Be My Valentine" },
+        "2-27": { theme: "Pokémon Day", greeting: "Happy Pokémon Day!" }, 
+        "3-5": { theme: "National Cheese Doodle Day", greeting: "Happy Cheese Doodle Day!" },
+        "3-10": { theme: "Mario Day (Mar10)", greeting: "It's-a Mario Day!" },
+        "4-20": { theme: "4/20 Celebration", greeting: "Blaze It" },
+        "4-22": { theme: "Jelly Bean Day", greeting: "Happy Jelly Bean Day!" },
+        "10-31": { theme: "Halloween", greeting: "Happy Halloween!" },
+        "12-25": { theme: "Christmas Day", greeting: "Merry Christmas" }
     };
 
     if (HOLIDAY_CALENDAR[monthDay]) return HOLIDAY_CALENDAR[monthDay];
 
-    // Fallback to external API for "Fake Internet Holidays"
     try {
         const res = await fetch(`https://www.checkiday.com/api/v3/events?date=${dateISO}`);
         const data = await res.json();
@@ -70,26 +65,26 @@ async function getHolidayContext() {
 async function main() {
     console.log("🚀 Starting Daily Doodle Bot...");
     const context = await getHolidayContext();
+    const safeGreeting = context.greeting || "Have a great day!";
+    const safeTheme = context.theme || "Today";
+
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const textModel = genAI.getGenerativeModel({ model: CONFIG.TEXT_MODEL });
     
-    // Determine Base Style (15-day rotation)
     const dayCount = Math.floor(today.getTime() / (1000 * 60 * 60 * 24));
     const baseStyle = BASE_VIBES[dayCount % BASE_VIBES.length];
 
-    // Generate the Daily Twist
-    const twistPrompt = `Base style: '${baseStyle}'. Holiday: '${context.theme}'. Write a 10-word artistic twist to make today's scene unique. No code, just prose.`;
-    const twistResult = await textModel.generateContent(twistPrompt);
+    // Get the unique AI twist
+    const twistResult = await textModel.generateContent(`Base style: '${baseStyle}'. Holiday: '${safeTheme}'. Write a 10-word artistic twist. No code, just prose.`);
     const artTwist = twistResult.response.text().trim();
 
-    // Generate Fun Fact
-    const factPrompt = `Give me one fun, short fact about ${context.theme}. Keep it under 20 words.`;
-    const factResult = await textModel.generateContent(factPrompt);
+    // Get the fun fact
+    const factResult = await textModel.generateContent(`One short fact about ${safeTheme} under 20 words.`);
     const fact = factResult.response.text().trim();
 
-    // Image Prompt Construction
-    const characterContext = `A small, round, yellow bear with a cream belly and purple eyes (HoneyBear), standing next to a pink pill-shaped jellybean wearing a backwards teal baseball cap (JellyBean).`;
-    const artPrompt = `${baseStyle}, ${artTwist}. Feature ${characterContext} celebrating ${context.theme}. STRICT: Render the text '${context.greeting.toUpperCase()}' EXACTLY ONCE. No streamer rooms. High resolution.`;
+    // Image Prompt
+    const characterContext = `A small, round, yellow bear with a cream belly and purple eyes, standing next to a pink pill-shaped jellybean wearing a backwards teal baseball cap.`;
+    const artPrompt = `${baseStyle}, ${artTwist}. Feature ${characterContext} celebrating ${safeTheme}. STRICT: Render the text '${safeGreeting.toUpperCase()}' EXACTLY ONCE. No streamer rooms.`;
 
     console.log(`🎨 Style: ${baseStyle}\n✨ Twist: ${artTwist}`);
 
@@ -97,26 +92,26 @@ async function main() {
     try {
         const imageModel = genAI.getGenerativeModel({ model: CONFIG.IMAGE_MODEL });
         const result = await imageModel.generateContent(artPrompt);
-        const base64Data = result.response.candidates[0].content.parts[0].inlineData.data;
+        const response = await result.response;
+        const base64Data = response.candidates[0].content.parts[0].inlineData.data;
         imageBuffer = Buffer.from(base64Data, 'base64');
     } catch (err) {
-        console.log("⚠️ Image generation failed or timed out. Falling back to Pollinations...");
-        const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(artPrompt)}?width=1024&height=1024&nologo=true`;
-        const pollRes = await fetch(pollUrl);
+        console.log("⚠️ Gemini Image failed. Falling back to Pollinations...");
+        const pollRes = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(artPrompt)}?width=1024&height=1024&nologo=true`);
         imageBuffer = await pollRes.arrayBuffer();
     }
 
-    // Post to Discord
     const formData = new FormData();
-    const payload = { content: `**${dateHeader}**\n# ${context.theme.toUpperCase()}\n${fact}` };
+    const payload = { content: `**${dateHeader}**\n# ${safeTheme.toUpperCase()}\n${fact}` };
     formData.set('payload_json', JSON.stringify(payload));
     formData.set('files[0]', new Blob([imageBuffer], { type: 'image/png' }), 'daily_doodle.png');
 
     const res = await fetch(CONFIG.DISCORD_URL, { method: 'POST', body: formData });
     if (res.ok) {
-        console.log(`🎉 Posted doodle for ${context.theme} to Discord!`);
+        console.log(`🎉 Success! Posted to Discord.`);
     } else {
-        console.error("❌ Failed to post to Discord:", await res.text());
+        const errText = await res.text();
+        console.error(`❌ Discord Error: ${errText}`);
     }
 }
 
