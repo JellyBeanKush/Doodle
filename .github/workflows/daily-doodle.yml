@@ -2,7 +2,6 @@ name: Daily Doodle Bot
 
 on:
   schedule:
-    # Runs at 14:00 UTC (7:00 AM PST) every day
     - cron: '0 14 * * *'
   workflow_dispatch:
 
@@ -25,7 +24,8 @@ jobs:
         run: npm install
 
       - name: Run Doodle Bot
-        run: node index.mjs
+        # Updated to match the filename in your screenshot
+        run: node daily-doodle.mjs
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
