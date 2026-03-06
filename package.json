@@ -1,10 +1,10 @@
 {
-  "name": "daily-doodle-bot",
-  "version": "1.0.0",
+  "name": "honeybear-bots",
+  "version": "2.0.0",
   "type": "module",
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
-    "node-fetch": "^3.3.2",
-    "formdata-node": "^6.0.3"
+    "@google/genai": "^1.44.0",
+    "formdata-node": "^6.0.3",
+    "node-fetch": "^3.3.2"
   }
 }
