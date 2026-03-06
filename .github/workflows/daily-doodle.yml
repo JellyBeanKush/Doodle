@@ -1,23 +1,38 @@
-name: Daily Doodle RUNNER
+name: Daily Doodle Bot
 
 on:
-  push:
-    branches: [main]
   schedule:
-    - cron: '0 16 * * *'
+    # Runs at 14:00 UTC (7:00 AM PST) every day
+    - cron: '0 14 * * *'
   workflow_dispatch:
 
 jobs:
-  run-doodle:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install
-      - name: Execute Script
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Doodle Bot
+        run: node index.mjs
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: node daily-doodle.mjs
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "DoodleBot"
+          git config --global user.email "bot@github.com"
+          git add .
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update daily history [skip ci]" && git push)
