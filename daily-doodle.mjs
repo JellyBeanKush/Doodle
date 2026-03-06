@@ -6,7 +6,7 @@ const CONFIG = {
     GEMINI_KEY: process.env.GEMINI_API_KEY,
     DISCORD_URL: process.env.DISCORD_WEBHOOK, 
     IMAGE_MODEL: "gemini-3-flash-image", // Nano Banana 2
-    TEXT_MODEL: "gemini-2.5-flash",
+    TEXT_MODEL: "gemini-3.1-flash-lite-preview",
     TIMEOUT_MS: 50000 
 };
 
@@ -37,15 +37,9 @@ const dateHeader = today.toLocaleDateString('en-US', {
 async function getHolidayContext() {
     const monthDay = `${today.getMonth() + 1}-${today.getDate()}`;
     const HOLIDAY_CALENDAR = {
-        "1-1": { theme: "New Year's Day", greeting: "Happy New Year!" },
-        "2-14": { theme: "Valentine's Day", greeting: "Be My Valentine" },
-        "2-27": { theme: "Pokémon Day", greeting: "Happy Pokémon Day!" }, 
-        "3-5": { theme: "National Cheese Doodle Day", greeting: "Happy Cheese Doodle Day!" },
+        "3-6": { theme: "National Oreo Cookie Day", greeting: "Happy Oreo Day!" },
         "3-10": { theme: "Mario Day (Mar10)", greeting: "It's-a Mario Day!" },
-        "4-20": { theme: "4/20 Celebration", greeting: "Blaze It" },
-        "4-22": { theme: "Jelly Bean Day", greeting: "Happy Jelly Bean Day!" },
-        "10-31": { theme: "Halloween", greeting: "Happy Halloween!" },
-        "12-25": { theme: "Christmas Day", greeting: "Merry Christmas" }
+        "4-22": { theme: "Jelly Bean Day", greeting: "Happy Jelly Bean Day!" }
     };
 
     if (HOLIDAY_CALENDAR[monthDay]) return HOLIDAY_CALENDAR[monthDay];
@@ -71,7 +65,7 @@ async function main() {
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const textModel = genAI.getGenerativeModel({ model: CONFIG.TEXT_MODEL });
     
-    // Style rotation logic (repeats every 15 days)
+    // Style rotation (repeats every 15 days)
     const dayCount = Math.floor(today.getTime() / (1000 * 60 * 60 * 24));
     const baseStyle = BASE_VIBES[dayCount % BASE_VIBES.length];
 
@@ -81,7 +75,7 @@ async function main() {
     const factResult = await textModel.generateContent(`One short fact about ${safeTheme} under 20 words.`);
     const fact = (await factResult.response).text().trim();
 
-    // Characters: description-based only as requested.
+    // Character descriptions only
     const characterContext = `A small, round, yellow bear with a cream belly and purple eyes, standing next to a pink oblong jellybean character wearing a backwards teal baseball cap.`;
     const artPrompt = `${baseStyle}, ${artTwist}. Feature ${characterContext} celebrating ${safeTheme}. STRICT: Render the text '${safeGreeting.toUpperCase()}' EXACTLY ONCE.`;
 
@@ -89,43 +83,50 @@ async function main() {
 
     let imageBuffer;
     try {
-        console.log("🎨 Attempting generation with Nano Banana 2...");
+        console.log("🎨 Generating with Nano Banana 2...");
         const imageModel = genAI.getGenerativeModel({ model: CONFIG.IMAGE_MODEL });
-        const result = await imageModel.generateContent(artPrompt);
-        const response = await result.response;
         
-        if (response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
-            const base64Data = response.candidates[0].content.parts[0].inlineData.data;
-            imageBuffer = Buffer.from(base64Data, 'base64');
-            console.log("✅ Nano Banana 2 Success!");
+        // Use the proper 2026 image generation method
+        const result = await imageModel.generateContent({
+            contents: [{ role: 'user', parts: [{ text: artPrompt }] }],
+            generationConfig: { responseMimeType: "image/png" }
+        });
+        
+        const response = await result.response;
+        const part = response.candidates[0].content.parts[0];
+
+        if (part.inlineData) {
+            imageBuffer = Buffer.from(part.inlineData.data, 'base64');
+            console.log("✅ Nano Banana 2 Image Generated!");
         } else {
-            throw new Error("No image data in Nano Banana 2 response.");
+            throw new Error("No inlineData found in response.");
         }
     } catch (err) {
-        console.log(`⚠️ Nano Banana 2 failed: ${err.message}. Falling back to Pollinations...`);
-        const pollRes = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(artPrompt)}?width=1024&height=1024&nologo=true`);
-        const arrayBuffer = await pollRes.arrayBuffer();
-        imageBuffer = Buffer.from(arrayBuffer); // Fixed conversion
+        console.warn(`⚠️ Nano Banana 2 failed: ${err.message}. Falling back to Pollinations...`);
+        const pollRes = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(artPrompt)}?width=1024&height=1024&nologo=true&seed=${dayCount}`);
+        imageBuffer = Buffer.from(await pollRes.arrayBuffer());
     }
 
-    if (!imageBuffer || imageBuffer.length < 500) {
-        throw new Error("Failed to generate a valid image buffer.");
+    // Validation to prevent the 16kb "broken" file issue
+    if (!imageBuffer || imageBuffer.length < 5000) {
+        throw new Error("Invalid image buffer: Image is too small or empty.");
     }
 
     const formData = new FormData();
-    const payload = { content: `**${dateHeader}**\n# ${safeTheme.toUpperCase()}\n${fact}` };
-    formData.set('payload_json', JSON.stringify(payload));
+    const payload = { 
+        content: `**${dateHeader}**\n# ${safeTheme.toUpperCase()}\n${fact}\n*Style: ${baseStyle}*` 
+    };
     
+    formData.set('payload_json', JSON.stringify(payload));
     const fileBlob = new Blob([imageBuffer], { type: 'image/png' });
     formData.set('files[0]', fileBlob, 'daily_doodle.png');
 
     const res = await fetch(CONFIG.DISCORD_URL, { method: 'POST', body: formData });
 
     if (res.ok) {
-        console.log(`🎉 Success! Posted to Discord.`);
+        console.log(`🎉 Daily Doodle posted!`);
     } else {
-        const errText = await res.text();
-        console.error(`❌ Discord Error: ${errText}`);
+        console.error(`❌ Discord Error: ${await res.text()}`);
     }
 }
 
