@@ -14,7 +14,7 @@ const CONFIG = {
     THREAD_ID: "1475685722341245239" // Target thread ID routing
 };
 
-// --- THE VARIITY PROTOCOL MATRICES ---
+// --- THE VARIETY PROTOCOL MATRICES ---
 const artStyles = [
     "Cozy 90s cartoon illustration style drawing", 
     "Vibrant cell-shaded anime aesthetic illustration", 
@@ -121,24 +121,23 @@ async function main() {
         console.log(`[Step 1 Verified] Holiday Chosen: ${data.holiday}`);
         console.log(`[Master Prompt Built]: ${data.masterPrompt}`);
 
-        // STEP 2: The Execution (Render Image natively utilizing the compiled text script)
+        // STEP 2: The Execution (Render Image natively using standard image endpoints)
         console.log("[Step 2 Executing] Invoking Image Engine...");
-        const imageModel = genAI.getGenerativeModel({ 
-            model: CONFIG.IMAGE_MODEL,
-            generationConfig: { responseMimeType: "image/png" }
+        const imageModel = genAI.getGenerativeModel({ model: CONFIG.IMAGE_MODEL });
+        
+        // Switched from generateContent to generateImages
+        const imageResult = await imageModel.generateImages({
+            prompt: data.masterPrompt,
+            numberOfImages: 1,
+            outputMimeType: "image/png",
+            aspectRatio: "1:1"
         });
         
-        const imageResult = await imageModel.generateContent(data.masterPrompt);
+        // Pull direct image base64 bytes instead of scanning text tokens
+        const rawBase64 = imageResult.generatedImages[0].image.imageBytes;
+        if (!rawBase64) throw new Error("Image conversion output mapping returned undefined.");
         
-        let imageBuffer = null;
-        for (const part of imageResult.response.candidates[0].content.parts) {
-            if (part.inlineData) {
-                imageBuffer = Buffer.from(part.inlineData.data, "base64");
-                break;
-            }
-        }
-
-        if (!imageBuffer) throw new Error("Image binary buffer allocation failed.");
+        const imageBuffer = Buffer.from(rawBase64, "base64");
 
         // Pack record dataset to update files
         const recordEntry = {
