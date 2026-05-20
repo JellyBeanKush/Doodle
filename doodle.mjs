@@ -7,8 +7,8 @@ import FormData from 'form-data';
 const CONFIG = {
     GEMINI_KEY: process.env.GEMINI_API_KEY,
     DISCORD_URL: process.env.DISCORD_WEBHOOK_URL,
-    TEXT_MODEL: "gemini-3.1-flash-lite-preview",
-    IMAGE_MODEL: "imagen-3.0-generate-002",
+    TEXT_MODEL: "gemini-2.0-flash", // Upgraded to stable 2.0 Flash for logic
+    IMAGE_MODEL: "imagen-3.0-generate-001", // Official AI Studio Imagen 3 endpoint
     SAVE_FILE: path.join(process.cwd(), 'current_doodle.txt'),
     HISTORY_FILE: path.join(process.cwd(), 'doodle_history.json'),
     THREAD_ID: "1475685722341245239" 
@@ -54,6 +54,7 @@ async function postToDiscord(dateTitle, holidayName, finalPrompt, imageBuffer) {
     };
 
     form.append('payload_json', JSON.stringify(payload));
+    // Ensure contentType is image/jpeg for Imagen 3 outputs
     form.append('files[0]', imageBuffer, { filename: 'doodle.jpg', contentType: 'image/jpeg' });
 
     const webhookUrlWithThread = `${CONFIG.DISCORD_URL}?thread_id=${CONFIG.THREAD_ID}`;
@@ -64,13 +65,20 @@ async function postToDiscord(dateTitle, holidayName, finalPrompt, imageBuffer) {
         headers: form.getHeaders()
     });
 
-    if (!response.ok) throw new Error(`Discord Upload Failed: ${await response.text()}`);
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Discord Upload Failed: ${response.status} - ${errorText}`);
+    }
 }
 
 async function main() {
     const now = new Date();
-    const dateKey = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' });
-    const fullDate = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/Los_Angeles' });
+    // Enforcing Pacific Time consistently for the bot
+    const dateOptions = { month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' };
+    const fullOptions = { ...dateOptions, year: 'numeric' };
+    
+    const dateKey = now.toLocaleDateString('en-US', dateOptions);
+    const fullDate = now.toLocaleDateString('en-US', fullOptions);
 
     let historyData = [];
     if (fs.existsSync(CONFIG.HISTORY_FILE)) {
@@ -112,26 +120,33 @@ async function main() {
             generationConfig: { responseMimeType: "application/json" }
         });
         const textResult = await textModel.generateContent(directorPrompt);
-        const data = JSON.parse(textResult.response.text());
+        
+        // Defensive cleanup: Strip markdown formatting if AI includes it
+        let rawJsonText = textResult.response.text().trim();
+        rawJsonText = rawJsonText.replace(/^```json/i, '').replace(/```$/i, '').trim();
+        const data = JSON.parse(rawJsonText);
         
         console.log(`[Step 1 Verified] Holiday Chosen: ${data.holiday}`);
         console.log(`[Master Prompt Built]: ${data.masterPrompt}`);
 
-        // STEP 2: The Execution (Direct REST API Call to bypass SDK limits)
+        // STEP 2: The Execution (Direct REST API Call to Imagen 3)
         console.log("[Step 2 Executing] Invoking Direct Imagen API...");
         
-        const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.IMAGE_MODEL}:predict?key=${CONFIG.GEMINI_KEY}`;
+        const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.IMAGE_MODEL}:predict`;
         const imagePayload = {
             instances: [{ prompt: data.masterPrompt }],
             parameters: {
                 sampleCount: 1,
-                aspectRatio: "1:1"
+                aspectRatio: "1:1" // Keeps it a perfect square for daily doodles
             }
         };
 
         const imageResponse = await fetch(imageUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-goog-api-key': CONFIG.GEMINI_KEY
+            },
             body: JSON.stringify(imagePayload)
         });
 
@@ -141,7 +156,7 @@ async function main() {
             throw new Error(`Imagen API Failed: ${JSON.stringify(imageResultJson)}`);
         }
 
-        const rawBase64 = imageResultJson.predictions[0].bytesBase64Encoded;
+        const rawBase64 = imageResultJson.predictions?.[0]?.bytesBase64Encoded;
         if (!rawBase64) throw new Error("Image binary conversion failed or returned empty.");
         
         const imageBuffer = Buffer.from(rawBase64, "base64");
