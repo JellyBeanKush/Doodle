@@ -8,10 +8,10 @@ const CONFIG = {
     GEMINI_KEY: process.env.GEMINI_API_KEY,
     DISCORD_URL: process.env.DISCORD_WEBHOOK_URL,
     TEXT_MODEL: "gemini-3.1-flash-lite-preview",
-    IMAGE_MODEL: "imagen-3.0-generate-002", // Optimized production image generation model
+    IMAGE_MODEL: "imagen-3.0-generate-002",
     SAVE_FILE: path.join(process.cwd(), 'current_doodle.txt'),
     HISTORY_FILE: path.join(process.cwd(), 'doodle_history.json'),
-    THREAD_ID: "1475685722341245239" // Target thread ID routing
+    THREAD_ID: "1475685722341245239" 
 };
 
 // --- THE VARIETY PROTOCOL MATRICES ---
@@ -48,15 +48,14 @@ async function postToDiscord(dateTitle, holidayName, finalPrompt, imageBuffer) {
         embeds: [{
             title: `🎨 The Daily Squish Artist (V6 Variety Protocol) — ${dateTitle}`,
             description: `**Today's Holiday:** ${holidayName}\n\n**The Final Master Prompt:**\n\`\`\`text\n${finalPrompt}\n\`\`\``,
-            color: 0x9b59b6, // Elegant purple theme
-            image: { url: 'attachment://doodle.png' }
+            color: 0x9b59b6, 
+            image: { url: 'attachment://doodle.jpg' }
         }]
     };
 
     form.append('payload_json', JSON.stringify(payload));
-    form.append('files[0]', imageBuffer, { filename: 'doodle.png', contentType: 'image/png' });
+    form.append('files[0]', imageBuffer, { filename: 'doodle.jpg', contentType: 'image/jpeg' });
 
-    // Append thread query parameter to send payload directly inside your active thread
     const webhookUrlWithThread = `${CONFIG.DISCORD_URL}?thread_id=${CONFIG.THREAD_ID}`;
 
     const response = await fetch(webhookUrlWithThread, {
@@ -73,19 +72,17 @@ async function main() {
     const dateKey = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' });
     const fullDate = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/Los_Angeles' });
 
-    // Load anti-monotony matrix history to check previous configurations
     let historyData = [];
     if (fs.existsSync(CONFIG.HISTORY_FILE)) {
         try { historyData = JSON.parse(fs.readFileSync(CONFIG.HISTORY_FILE, 'utf8')); } catch { }
     }
     const recentHolidays = historyData.slice(0, 10).map(h => h.holiday.toLowerCase());
 
-    // Pull random configuration matrices for today's run
     const pickedStyle = artStyles[Math.floor(Math.random() * artStyles.length)];
     const pickedComposition = compositions[Math.floor(Math.random() * compositions.length)];
     const pickedPosition = positioningRules[Math.floor(Math.random() * positioningRules.length)];
 
-    // STEP 1: The Director Prompt (Holiday finder & Master Prompt builder matching Gem system rules)
+    // STEP 1: The Director Prompt
     const directorPrompt = `You are an autonomous AI artist creating daily content for the HoneyBearSquish community. 
     Today's system date is: ${fullDate}.
 
@@ -110,7 +107,6 @@ async function main() {
         console.log(`[V6 Protocol] Initiating Stage 1 Analysis for: ${fullDate}...`);
         const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
         
-        // Step 1 Execution: Find the holiday and orchestrate the layout
         const textModel = genAI.getGenerativeModel({ 
             model: CONFIG.TEXT_MODEL,
             generationConfig: { responseMimeType: "application/json" }
@@ -121,25 +117,36 @@ async function main() {
         console.log(`[Step 1 Verified] Holiday Chosen: ${data.holiday}`);
         console.log(`[Master Prompt Built]: ${data.masterPrompt}`);
 
-        // STEP 2: The Execution (Render Image natively using standard image endpoints)
-        console.log("[Step 2 Executing] Invoking Image Engine...");
-        const imageModel = genAI.getGenerativeModel({ model: CONFIG.IMAGE_MODEL });
+        // STEP 2: The Execution (Direct REST API Call to bypass SDK limits)
+        console.log("[Step 2 Executing] Invoking Direct Imagen API...");
         
-        // Switched from generateContent to generateImages
-        const imageResult = await imageModel.generateImages({
-            prompt: data.masterPrompt,
-            numberOfImages: 1,
-            outputMimeType: "image/png",
-            aspectRatio: "1:1"
+        const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.IMAGE_MODEL}:predict?key=${CONFIG.GEMINI_KEY}`;
+        const imagePayload = {
+            instances: [{ prompt: data.masterPrompt }],
+            parameters: {
+                sampleCount: 1,
+                aspectRatio: "1:1"
+            }
+        };
+
+        const imageResponse = await fetch(imageUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(imagePayload)
         });
-        
-        // Pull direct image base64 bytes instead of scanning text tokens
-        const rawBase64 = imageResult.generatedImages[0].image.imageBytes;
-        if (!rawBase64) throw new Error("Image conversion output mapping returned undefined.");
+
+        const imageResultJson = await imageResponse.json();
+
+        if (!imageResponse.ok) {
+            throw new Error(`Imagen API Failed: ${JSON.stringify(imageResultJson)}`);
+        }
+
+        const rawBase64 = imageResultJson.predictions[0].bytesBase64Encoded;
+        if (!rawBase64) throw new Error("Image binary conversion failed or returned empty.");
         
         const imageBuffer = Buffer.from(rawBase64, "base64");
 
-        // Pack record dataset to update files
+        // Save records locally
         const recordEntry = {
             date: fullDate,
             holiday: data.holiday,
@@ -147,14 +154,13 @@ async function main() {
             masterPrompt: data.masterPrompt
         };
 
-        // Write outputs into project file structure
         fs.writeFileSync(CONFIG.SAVE_FILE, JSON.stringify(recordEntry, null, 2), 'utf8');
-        fs.writeFileSync('current_doodle.png', imageBuffer);
+        fs.writeFileSync('current_doodle.jpg', imageBuffer);
         
         historyData.unshift(recordEntry);
         fs.writeFileSync(CONFIG.HISTORY_FILE, JSON.stringify(historyData.slice(0, 100), null, 2), 'utf8');
 
-        // Post directly inside the dedicated target thread
+        // Post to Discord
         console.log("[Discord] Pushing artwork payload to targeted thread...");
         await postToDiscord(fullDate, data.holiday, data.masterPrompt, imageBuffer);
         console.log("[Success] V6 Broadcast Process Completed.");
