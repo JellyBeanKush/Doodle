@@ -7,8 +7,17 @@ import FormData from 'form-data';
 const CONFIG = {
     GEMINI_KEY: process.env.GEMINI_API_KEY,
     DISCORD_URL: process.env.DISCORD_WEBHOOK_URL,
-    TEXT_MODEL: "gemini-2.0-flash", // Upgraded to stable 2.0 Flash for logic
-    IMAGE_MODEL: "imagen-3.0-generate-001", // Official AI Studio Imagen 3 endpoint
+    
+    // The Waterfall Array: Newest/Smartest down to Highest Free Quota
+    TEXT_MODELS: [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash", 
+        "gemini-1.5-pro", 
+        "gemini-1.5-flash", 
+        "gemini-1.5-flash-8b"
+    ],
+    
+    IMAGE_MODEL: "imagen-3.0-generate-001",
     SAVE_FILE: path.join(process.cwd(), 'current_doodle.txt'),
     HISTORY_FILE: path.join(process.cwd(), 'doodle_history.json'),
     THREAD_ID: "1475685722341245239" 
@@ -54,7 +63,6 @@ async function postToDiscord(dateTitle, holidayName, finalPrompt, imageBuffer) {
     };
 
     form.append('payload_json', JSON.stringify(payload));
-    // Ensure contentType is image/jpeg for Imagen 3 outputs
     form.append('files[0]', imageBuffer, { filename: 'doodle.jpg', contentType: 'image/jpeg' });
 
     const webhookUrlWithThread = `${CONFIG.DISCORD_URL}?thread_id=${CONFIG.THREAD_ID}`;
@@ -73,7 +81,6 @@ async function postToDiscord(dateTitle, holidayName, finalPrompt, imageBuffer) {
 
 async function main() {
     const now = new Date();
-    // Enforcing Pacific Time consistently for the bot
     const dateOptions = { month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' };
     const fullOptions = { ...dateOptions, year: 'numeric' };
     
@@ -90,7 +97,6 @@ async function main() {
     const pickedComposition = compositions[Math.floor(Math.random() * compositions.length)];
     const pickedPosition = positioningRules[Math.floor(Math.random() * positioningRules.length)];
 
-    // STEP 1: The Director Prompt
     const directorPrompt = `You are an autonomous AI artist creating daily content for the HoneyBearSquish community. 
     Today's system date is: ${fullDate}.
 
@@ -115,18 +121,38 @@ async function main() {
         console.log(`[V6 Protocol] Initiating Stage 1 Analysis for: ${fullDate}...`);
         const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
         
-        const textModel = genAI.getGenerativeModel({ 
-            model: CONFIG.TEXT_MODEL,
-            generationConfig: { responseMimeType: "application/json" }
-        });
-        const textResult = await textModel.generateContent(directorPrompt);
-        
-        // Defensive cleanup: Strip markdown formatting if AI includes it
-        let rawJsonText = textResult.response.text().trim();
-        rawJsonText = rawJsonText.replace(/^```json/i, '').replace(/```$/i, '').trim();
-        const data = JSON.parse(rawJsonText);
-        
-        console.log(`[Step 1 Verified] Holiday Chosen: ${data.holiday}`);
+        let data = null;
+        let successfulModel = "";
+
+        // STEP 1: The Execution (Waterfall Fallback Loop)
+        for (const modelName of CONFIG.TEXT_MODELS) {
+            try {
+                console.log(`[Stage 1] Attempting to generate director prompt with: ${modelName}...`);
+                const textModel = genAI.getGenerativeModel({ 
+                    model: modelName,
+                    generationConfig: { responseMimeType: "application/json" }
+                });
+                
+                const textResult = await textModel.generateContent(directorPrompt);
+                let rawJsonText = textResult.response.text().trim();
+                rawJsonText = rawJsonText.replace(/^```json/i, '').replace(/```$/i, '').trim();
+                
+                data = JSON.parse(rawJsonText);
+                successfulModel = modelName;
+                
+                console.log(`[Step 1 Verified] Success using ${successfulModel}! Holiday Chosen: ${data.holiday}`);
+                break; // Exit the loop if successful
+                
+            } catch (error) {
+                console.warn(`[Warning] Model ${modelName} failed: ${error.message.split('\n')[0]}`);
+                // If we are on the last model in the array and it fails, throw the fatal error
+                if (modelName === CONFIG.TEXT_MODELS[CONFIG.TEXT_MODELS.length - 1]) {
+                    throw new Error(`All fallback models exhausted. Final error: ${error.message}`);
+                }
+                console.log(`[Fallback] Routing to next available model...`);
+            }
+        }
+
         console.log(`[Master Prompt Built]: ${data.masterPrompt}`);
 
         // STEP 2: The Execution (Direct REST API Call to Imagen 3)
@@ -137,7 +163,7 @@ async function main() {
             instances: [{ prompt: data.masterPrompt }],
             parameters: {
                 sampleCount: 1,
-                aspectRatio: "1:1" // Keeps it a perfect square for daily doodles
+                aspectRatio: "1:1" 
             }
         };
 
@@ -161,7 +187,6 @@ async function main() {
         
         const imageBuffer = Buffer.from(rawBase64, "base64");
 
-        // Save records locally
         const recordEntry = {
             date: fullDate,
             holiday: data.holiday,
@@ -175,7 +200,6 @@ async function main() {
         historyData.unshift(recordEntry);
         fs.writeFileSync(CONFIG.HISTORY_FILE, JSON.stringify(historyData.slice(0, 100), null, 2), 'utf8');
 
-        // Post to Discord
         console.log("[Discord] Pushing artwork payload to targeted thread...");
         await postToDiscord(fullDate, data.holiday, data.masterPrompt, imageBuffer);
         console.log("[Success] V6 Broadcast Process Completed.");
