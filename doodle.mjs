@@ -17,7 +17,9 @@ const CONFIG = {
         "gemini-1.5-flash-8b"
     ],
     
-    IMAGE_MODEL: "imagen-3.0-generate-001",
+    // Updated native image model
+    IMAGE_MODEL: "gemini-3.1-flash-image-preview",
+    
     SAVE_FILE: path.join(process.cwd(), 'current_doodle.txt'),
     HISTORY_FILE: path.join(process.cwd(), 'doodle_history.json'),
     THREAD_ID: "1475685722341245239" 
@@ -141,11 +143,10 @@ async function main() {
                 successfulModel = modelName;
                 
                 console.log(`[Step 1 Verified] Success using ${successfulModel}! Holiday Chosen: ${data.holiday}`);
-                break; // Exit the loop if successful
+                break; 
                 
             } catch (error) {
                 console.warn(`[Warning] Model ${modelName} failed: ${error.message.split('\n')[0]}`);
-                // If we are on the last model in the array and it fails, throw the fatal error
                 if (modelName === CONFIG.TEXT_MODELS[CONFIG.TEXT_MODELS.length - 1]) {
                     throw new Error(`All fallback models exhausted. Final error: ${error.message}`);
                 }
@@ -155,16 +156,14 @@ async function main() {
 
         console.log(`[Master Prompt Built]: ${data.masterPrompt}`);
 
-        // STEP 2: The Execution (Direct REST API Call to Imagen 3)
-        console.log("[Step 2 Executing] Invoking Direct Imagen API...");
+        // STEP 2: The Execution (Direct REST API Call to Gemini 3.1 Flash Image)
+        console.log("[Step 2 Executing] Invoking Direct Image API...");
         
-        const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.IMAGE_MODEL}:predict`;
+        const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.IMAGE_MODEL}:generateContent`;
         const imagePayload = {
-            instances: [{ prompt: data.masterPrompt }],
-            parameters: {
-                sampleCount: 1,
-                aspectRatio: "1:1" 
-            }
+            contents: [{
+                parts: [{ text: data.masterPrompt }]
+            }]
         };
 
         const imageResponse = await fetch(imageUrl, {
@@ -179,14 +178,20 @@ async function main() {
         const imageResultJson = await imageResponse.json();
 
         if (!imageResponse.ok) {
-            throw new Error(`Imagen API Failed: ${JSON.stringify(imageResultJson)}`);
+            throw new Error(`Image API Failed: ${JSON.stringify(imageResultJson)}`);
         }
 
-        const rawBase64 = imageResultJson.predictions?.[0]?.bytesBase64Encoded;
-        if (!rawBase64) throw new Error("Image binary conversion failed or returned empty.");
+        const candidate = imageResultJson.candidates?.[0];
+        const imagePart = candidate?.content?.parts?.find(p => p.inlineData);
         
+        if (!imagePart || !imagePart.inlineData || !imagePart.inlineData.data) {
+             throw new Error(`Image binary conversion failed or returned empty. API Output: ${JSON.stringify(imageResultJson)}`);
+        }
+        
+        const rawBase64 = imagePart.inlineData.data;
         const imageBuffer = Buffer.from(rawBase64, "base64");
 
+        // Save records locally
         const recordEntry = {
             date: fullDate,
             holiday: data.holiday,
@@ -200,6 +205,7 @@ async function main() {
         historyData.unshift(recordEntry);
         fs.writeFileSync(CONFIG.HISTORY_FILE, JSON.stringify(historyData.slice(0, 100), null, 2), 'utf8');
 
+        // Post to Discord
         console.log("[Discord] Pushing artwork payload to targeted thread...");
         await postToDiscord(fullDate, data.holiday, data.masterPrompt, imageBuffer);
         console.log("[Success] V6 Broadcast Process Completed.");
