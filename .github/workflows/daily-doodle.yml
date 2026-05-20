@@ -2,17 +2,20 @@ name: Daily Doodle Bot
 
 on:
   schedule:
-    - cron: '0 14 * * *'
-  workflow_dispatch:
+    # Runs at 17:00 UTC (10:00 AM PST) every day
+    - cron: '0 17 * * *'
+  workflow_dispatch: # Allows you to run it manually for testing via the Actions tab
 
 jobs:
-  build:
+  run-doodle-bot:
     runs-on: ubuntu-latest
+    
+    # Grants the workflow permission to save logs and images back to your repo
     permissions:
       contents: write
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -21,18 +24,21 @@ jobs:
           node-version: '20'
 
       - name: Install Dependencies
-        run: npm install
+        run: npm install @google/generative-ai node-fetch form-data
 
-      - name: Run Doodle Bot
-        # Updated to match the filename in your screenshot
-        run: node daily-doodle.mjs
+      - name: Run Doodle Script
+        run: node doodle.mjs
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-      - name: Commit and Push Changes
+      - name: Commit and Push Doodle Artifacts
         run: |
-          git config --global user.name "DoodleBot"
+          git config --global user.name "Doodle Bot"
           git config --global user.email "bot@github.com"
-          git add .
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update daily history [skip ci]" && git push)
+          
+          # Tracks the history array, the current text log, and the actual generated PNG file
+          git add doodle_history.json current_doodle.txt current_doodle.png
+          
+          # Only commits if changes were made to prevent workflow empty errors
+          git diff-index --quiet HEAD || (git commit -m "Update daily artist logs [skip ci]" && git push)
