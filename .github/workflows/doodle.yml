@@ -4,7 +4,7 @@ on:
   schedule:
     # Runs at 17:00 UTC (10:00 AM PST) every day
     - cron: '0 17 * * *'
-  workflow_dispatch: # Allows you to run it manually for testing via the Actions tab
+  workflow_dispatch: # Allows manual button clicks for testing
 
 jobs:
   run-doodle-bot:
@@ -37,8 +37,8 @@ jobs:
           git config --global user.name "Doodle Bot"
           git config --global user.email "bot@github.com"
           
-          # Tracks the history array, the current text log, and the actual generated PNG file
-          git add doodle_history.json current_doodle.txt current_doodle.png
+          # Tracks the history array, the current text log, and the actual generated JPEG file
+          git add doodle_history.json current_doodle.txt current_doodle.jpg
           
           # Only commits if changes were made to prevent workflow empty errors
           git diff-index --quiet HEAD || (git commit -m "Update daily artist logs [skip ci]" && git push)
